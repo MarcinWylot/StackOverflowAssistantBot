@@ -5,20 +5,12 @@ import pickle
 import sklearn.feature_extraction.text
 import sklearn.linear_model
 import sklearn.multiclass
+import gensim.models.doc2vec
+import nltk.tokenize
 
 import utils
 
-
-RESOURCE_PATH = {
-    'DIALOGUES': 'data/dialogues.tsv',
-    'QUESTIONS': 'data/tagged_posts.tsv',
-    'INTENT_TFIDF_VECTORIZER': 'models/intent_tfidf_vectorizer.pkl',
-    'INTENT_RECOGNIZER': 'models/intent_recognizer.pkl',
-    'TAG_TFIDF_VECTORIZER': 'models/tag_tfidf_vectorizer.pkl',
-    'TAG_CLASSIFIER': 'models/tag_classifier.pkl',
-    'THREAD_EMBEDDINGS_FOLDER': 'models/thread_embeddings_by_tags',
-    'QUESTIONS_EMBEDDINGS': 'models/questions_embeddings.tsv' #made by starspace
-}
+RESOURCE_PATH = utils.RESOURCE_PATH
 
 
 def tfidf_features(text, vectorizer_path):
@@ -49,38 +41,59 @@ def make_intent_recognizer():
 
     text_tfidf = tfidf_features(text, RESOURCE_PATH['INTENT_TFIDF_VECTORIZER'])
 
-    intent_recognizer = sklearn.linear_model.LogisticRegression(C=5).fit(text_tfidf, intent)
-    pickle.dump(intent_recognizer, open(RESOURCE_PATH['INTENT_RECOGNIZER'], 'wb'))
+    intent_recognizer = sklearn.linear_model.LogisticRegression(C=5, solver='lbfgs', max_iter=1000).fit(text_tfidf, intent)
+    with open(RESOURCE_PATH['INTENT_RECOGNIZER'], 'wb') as f:
+        pickle.dump(intent_recognizer, f, pickle.HIGHEST_PROTOCOL)
 
 
 def make_tag_classifier(questions_df):
     questions_tfidf = tfidf_features(questions_df['title'].values, RESOURCE_PATH['TAG_TFIDF_VECTORIZER'])
 
-    tag_classifier = sklearn.multiclass.OneVsRestClassifier(sklearn.linear_model.LogisticRegression(C=5))
+    tag_classifier = sklearn.linear_model.LogisticRegression(C=5, solver='lbfgs', max_iter=1000, multi_class='ovr')
     tag_classifier.fit(questions_tfidf, questions_df['tag'].values)
 
-    pickle.dump(tag_classifier, open(RESOURCE_PATH['TAG_CLASSIFIER'], 'wb'))
+    with open(RESOURCE_PATH['TAG_CLASSIFIER'], 'wb') as f:
+        pickle.dump(tag_classifier, f, pickle.HIGHEST_PROTOCOL)
 
 
-def make_embedings4tags(questions_df):
-    questions_embeddings, questions_embeddings_dim = utils.load_embeddings(RESOURCE_PATH['QUESTIONS_EMBEDDINGS'])
+def tag_tokenize(sentences):
+    for i, v in enumerate(sentences):
+        yield gensim.models.doc2vec.TaggedDocument(nltk.tokenize.word_tokenize(v), [i])
 
+
+def make_embeddings(sentences):
+    documents = list(tag_tokenize(sentences['title']))
+
+    # doc2vec parameters
+    vector_size = 300
+    window_size = 15
+    train_epoch = 100
+    worker_count = 4
+
+    model = gensim.models.doc2vec.Doc2Vec(documents, vector_size=vector_size, window=window_size,
+                                          workers=worker_count,  epochs=train_epoch)
+
+    return model
+
+
+def make_embeddings4tags(questions_df):
     counts_by_tag = questions_df.groupby('tag')['post_id'].count()
 
     os.makedirs(RESOURCE_PATH['THREAD_EMBEDDINGS_FOLDER'], exist_ok=True)
 
     for tag, count in counts_by_tag.items():
+        print('building a model for:', tag)
         tag_posts = questions_df[questions_df['tag'] == tag]
-
         tag_post_ids = tag_posts['post_id'].values
 
-        tag_vectors = np.zeros((count, questions_embeddings_dim), dtype=np.float32)
-        for i, title in enumerate(tag_posts['title']):
-            tag_vectors[i, :] = utils.question_to_vec(title, questions_embeddings, questions_embeddings_dim)
+        model = make_embeddings(tag_posts)
+        model.delete_temporary_training_data(keep_doctags_vectors=True, keep_inference=True)
 
         # Dump post ids and vectors to a file.
         filename = os.path.join(RESOURCE_PATH['THREAD_EMBEDDINGS_FOLDER'], os.path.normpath('%s.pkl' % tag))
-        pickle.dump((tag_post_ids, tag_vectors), open(filename, 'wb'))
+
+        with open(filename, 'wb') as f:
+            pickle.dump((tag_post_ids, model), f, pickle.HIGHEST_PROTOCOL)
 
 
 def prepare_questions():
@@ -91,11 +104,17 @@ def prepare_questions():
 
 
 def main():
+    print('make_intent_recognizer()')
     make_intent_recognizer()
+    print('prepare_questions()')
     questions = prepare_questions()
+    print('make_tag_classifier()')
     make_tag_classifier(questions)
-    make_embedings4tags(questions)
+    print('make_embeddings4tags()')
+    make_embeddings4tags(questions)
+    print('DONE')
 
 
 if __name__ == "__main__":
     main()
+
