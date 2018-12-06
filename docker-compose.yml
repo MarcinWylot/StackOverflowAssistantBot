@@ -1,0 +1,28 @@
+version: '3.4'
+
+x-common-variables: &common-variables
+  PYTHONUNBUFFERED: 1
+  NLTK_DATA: /nltk_data
+
+services:
+  so_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      <<: *common-variables
+      TELEGRAM_TOKEN:
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: $HOME/data
+        target: /data
+      - type: volume
+        source: so_models
+        target: /models
+
+#  docker volume create --name=so_models
+#  docker cp models/* stackoverflowassistantbot_so_bot_1:/models/
+volumes:
+  so_models:
+    external: true

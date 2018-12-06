@@ -2,8 +2,8 @@ import re
 import pickle
 import nltk.corpus
 
-nltk.download('stopwords')
-nltk.download('punkt')
+#nltk.download('stopwords')
+#nltk.download('punkt')
 
 replace_by_space_re = re.compile('[/(){}\[\]\|@,;]')
 bad_symbols_re = re.compile('[^0-9a-z #+_]')
