@@ -36,11 +36,11 @@ def unpickle_file(filename):
 
 
 RESOURCE_PATH = {
-    'DIALOGUES': 'data/dialogues.tsv',
-    'QUESTIONS': 'data/tagged_posts.tsv',
-    'INTENT_TFIDF_VECTORIZER': 'models/intent_tfidf_vectorizer.pkl',
-    'INTENT_RECOGNIZER': 'models/intent_recognizer.pkl',
-    'TAG_TFIDF_VECTORIZER': 'models/tag_tfidf_vectorizer.pkl',
-    'TAG_CLASSIFIER': 'models/tag_classifier.pkl',
-    'THREAD_EMBEDDINGS_FOLDER': 'models/thread_embeddings_by_tags'
+    'DIALOGUES': '/data/dialogues.tsv',
+    'QUESTIONS': '/data/tagged_posts.tsv',
+    'INTENT_TFIDF_VECTORIZER': '/models/intent_tfidf_vectorizer.pkl',
+    'INTENT_RECOGNIZER': '/models/intent_recognizer.pkl',
+    'TAG_TFIDF_VECTORIZER': '/models/tag_tfidf_vectorizer.pkl',
+    'TAG_CLASSIFIER': '/models/tag_classifier.pkl',
+    'THREAD_EMBEDDINGS_FOLDER': '/models/thread_embeddings_by_tags'
 }
