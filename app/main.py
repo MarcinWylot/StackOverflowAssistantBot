@@ -7,7 +7,7 @@ import os
 import json
 import requests.compat
 
-import dialogue_manager
+from modern_dialogue_manager import DialogueManager
 
 
 class BotHandler(object):
@@ -78,7 +78,7 @@ def main():
             return
         token = os.environ["TELEGRAM_TOKEN"]
 
-    manager = dialogue_manager.DialogueManager()
+    manager = DialogueManager()
     bot = BotHandler(token, manager)
 
     print("Ready to talk!")

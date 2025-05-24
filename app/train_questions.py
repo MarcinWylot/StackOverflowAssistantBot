@@ -3,10 +3,11 @@ import numpy as np
 import pandas as pd
 import pickle
 import sklearn.feature_extraction.text
-import sklearn.linear_model
-import sklearn.multiclass
-import gensim.models.doc2vec
-import nltk.tokenize
+from sentence_transformers import SentenceTransformer
+from transformers import (AutoTokenizer, AutoModelForSequenceClassification,
+                          Trainer, TrainingArguments)
+from torch.utils.data import Dataset
+import torch
 
 import utils
 
@@ -39,41 +40,60 @@ def make_intent_recognizer():
     text = np.concatenate([dialogues_df['text'].values, questions_df['title'].values])
     intent = ['dialogue'] * dialogues_df.shape[0] + ['question'] * questions_df.shape[0]
 
-    text_tfidf = tfidf_features(text, RESOURCE_PATH['INTENT_TFIDF_VECTORIZER'])
+    tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
+    model = AutoModelForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=2)
 
-    intent_recognizer = sklearn.linear_model.LogisticRegression(C=5, solver='lbfgs', max_iter=1000).fit(text_tfidf, intent)
-    with open(RESOURCE_PATH['INTENT_RECOGNIZER'], 'wb') as f:
-        pickle.dump(intent_recognizer, f, pickle.HIGHEST_PROTOCOL)
+    class TextDataset(Dataset):
+        def __init__(self, texts, labels):
+            enc = tokenizer(texts, truncation=True, padding=True)
+            self.encodings = enc
+            self.labels = labels
+        def __len__(self):
+            return len(self.labels)
+        def __getitem__(self, idx):
+            item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
+            item['labels'] = torch.tensor(self.labels[idx])
+            return item
+
+    labels = np.array([0 if t == 'dialogue' else 1 for t in intent])
+    dataset = TextDataset(list(text), labels)
+    training_args = TrainingArguments(output_dir='/models/intent', num_train_epochs=1, per_device_train_batch_size=8, logging_steps=10)
+    trainer = Trainer(model=model, args=training_args, train_dataset=dataset)
+    trainer.train()
+    model.save_pretrained(RESOURCE_PATH['INTENT_RECOGNIZER'])
+    tokenizer.save_pretrained(RESOURCE_PATH['INTENT_TFIDF_VECTORIZER'])
 
 
 def make_tag_classifier(questions_df):
-    questions_tfidf = tfidf_features(questions_df['title'].values, RESOURCE_PATH['TAG_TFIDF_VECTORIZER'])
+    tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
+    labels = sorted(questions_df['tag'].unique())
+    label_map = {l: i for i, l in enumerate(labels)}
+    model = AutoModelForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=len(labels))
 
-    tag_classifier = sklearn.linear_model.LogisticRegression(C=5, solver='lbfgs', max_iter=1000, multi_class='ovr')
-    tag_classifier.fit(questions_tfidf, questions_df['tag'].values)
+    class TextDataset(Dataset):
+        def __init__(self, texts, labs):
+            enc = tokenizer(texts, truncation=True, padding=True)
+            self.encodings = enc
+            self.labels = [label_map[l] for l in labs]
+        def __len__(self):
+            return len(self.labels)
+        def __getitem__(self, idx):
+            item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
+            item['labels'] = torch.tensor(self.labels[idx])
+            return item
 
-    with open(RESOURCE_PATH['TAG_CLASSIFIER'], 'wb') as f:
-        pickle.dump(tag_classifier, f, pickle.HIGHEST_PROTOCOL)
-
-
-def tag_tokenize(sentences):
-    for i, v in enumerate(sentences):
-        yield gensim.models.doc2vec.TaggedDocument(nltk.tokenize.word_tokenize(v), [i])
+    dataset = TextDataset(questions_df['title'].tolist(), questions_df['tag'].tolist())
+    training_args = TrainingArguments(output_dir='/models/tag', num_train_epochs=1, per_device_train_batch_size=8, logging_steps=10)
+    trainer = Trainer(model=model, args=training_args, train_dataset=dataset)
+    trainer.train()
+    model.save_pretrained(RESOURCE_PATH['TAG_CLASSIFIER'])
+    tokenizer.save_pretrained(RESOURCE_PATH['TAG_TFIDF_VECTORIZER'])
 
 
 def make_embeddings(sentences):
-    documents = list(tag_tokenize(sentences['title']))
-
-    # doc2vec parameters
-    vector_size = 300
-    window_size = 15
-    train_epoch = 100
-    worker_count = 4
-
-    model = gensim.models.doc2vec.Doc2Vec(documents, vector_size=vector_size, window=window_size,
-                                          workers=worker_count,  epochs=train_epoch)
-
-    return model
+    """Compute sentence embeddings for question titles."""
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    return model.encode(sentences['title'].tolist())
 
 
 def make_embeddings4tags(questions_df):
@@ -86,14 +106,12 @@ def make_embeddings4tags(questions_df):
         tag_posts = questions_df[questions_df['tag'] == tag]
         tag_post_ids = tag_posts['post_id'].values
 
-        model = make_embeddings(tag_posts)
-        model.delete_temporary_training_data(keep_doctags_vectors=True, keep_inference=True)
+        vectors = make_embeddings(tag_posts)
 
-        # Dump post ids and vectors to a file.
         filename = os.path.join(RESOURCE_PATH['THREAD_EMBEDDINGS_FOLDER'], os.path.normpath('%s.pkl' % tag))
 
         with open(filename, 'wb') as f:
-            pickle.dump((tag_post_ids, model), f, pickle.HIGHEST_PROTOCOL)
+            pickle.dump((tag_post_ids, vectors), f, pickle.HIGHEST_PROTOCOL)
 
 
 def prepare_questions():
